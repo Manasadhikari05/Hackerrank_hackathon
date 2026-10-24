@@ -69,8 +69,9 @@ def verdict_for(action: RuleType, record: EvidenceRecord) -> Verdict | None:
         return Verdict(True, None, None, Operation.VERIFY_RECORD_ANONYMIZED, "not attributable")
     if action == RuleType.RETAIN:
         if absent:
-            # No allowed operation restores a missing retained record; surfaced as a warning.
-            return Verdict(True, None, None, None, "retained record missing")
+            # A record that policy requires to be retained is gone. No allowed operation restores
+            # it, so it is reported as unresolved (never COMPLETE) with the check that must pass.
+            return Verdict(False, None, None, Operation.VERIFY_RECORD_PRESENT, "required retained record missing")
         if present:
             return Verdict(True, None, None, Operation.VERIFY_RECORD_PRESENT, "retained by policy")
     return None

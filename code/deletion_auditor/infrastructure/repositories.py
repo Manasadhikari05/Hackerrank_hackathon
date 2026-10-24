@@ -58,6 +58,9 @@ class CsvRequestRepository(RequestRepository):
             audit = parse_ts(row.get("audit_at"))
             if not case_id or requested is None or audit is None:
                 raise MalformedInputError(f"{self._path.name}:{i} has an empty case_id or invalid timestamp")
+            if requested > audit:
+                # A request cannot be audited before it was made; equal timestamps are valid.
+                raise MalformedInputError(f"{self._path.name}:{i} ({case_id}) has requested_at after audit_at")
             if case_id in seen:
                 raise MalformedInputError(f"{self._path.name}:{i} duplicates case_id {case_id}")
             seen.add(case_id)

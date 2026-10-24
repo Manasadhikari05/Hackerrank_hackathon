@@ -3,3 +3,4 @@ cc_1,ines.m.old@example.org,2026-09-01T10:00:00Z,COMPLETE,2026-09-03T10:00:00Z,2
 cc_2,tomas.novak@example.net,2026-09-02T10:00:00Z,NOT_STARTED,2026-09-03T10:00:00Z,2026-09-20T10:00:00Z,"Please send me a copy of the data you hold about me. I still use the account, so keep the account as it is."
 cc_3,aiko.sato@example.com,2026-09-01T10:00:00Z,COMPLETE,2026-09-02T10:00:00Z,2026-09-15T10:00:00Z,"Please confirm my account was deleted. Keeping an internal deleted-account reference is fine."
 cc_4,ravi.menon@example.com,2026-09-01T10:00:00Z,COMPLETE,2026-09-02T10:00:00Z,2026-09-20T10:00:00Z,"Please erase my account. A search result for a similar address belongs to my son, so do not touch that one."
+cc_5,nobody.here@example.com,2026-09-01T10:00:00Z,COMPLETE,2026-09-02T10:00:00Z,2026-09-20T10:00:00Z,"My deletion was confirmed by email. Please verify that my account was deleted."

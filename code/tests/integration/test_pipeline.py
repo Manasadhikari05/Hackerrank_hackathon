@@ -69,7 +69,7 @@ def test_unsupported_format_is_reported(custom_dataset, tmp_path):
 def test_corrupt_evidence_does_not_abort(custom_dataset, tmp_path):
     (custom_dataset / "evidence/records/service_resource_export_20260910.json").write_text("{broken")
     _, summary = run(custom_dataset, tmp_path)
-    assert summary.cases == 4 and not summary.errors
+    assert summary.cases == 5 and not summary.errors
 
 
 def test_malformed_requests_fail_fast(custom_dataset, tmp_path):
@@ -99,6 +99,75 @@ def test_decoy_identity_is_not_linked(custom_dataset, tmp_path):
     run(custom_dataset, tmp_path)
     _, steps = rows(tmp_path / "out.csv")["cc_4"]
     assert "search_7504" not in {s["resource_id"] for s in steps}
+
+
+def test_unlinkable_subject_is_incomplete_not_complete(custom_dataset, tmp_path):
+    """Regression for the reported bug: no admissible evidence -> INCOMPLETE,[] (never COMPLETE,[])."""
+    run(custom_dataset, tmp_path)
+    assert rows(tmp_path / "out.csv")["cc_5"] == ("INCOMPLETE", [])
+
+
+def test_requested_after_audit_is_rejected(custom_dataset, tmp_path):
+    p = custom_dataset / "deletion_requests.csv"
+    p.write_text(
+        p.read_text().replace(
+            "cc_2,tomas.novak@example.net,2026-09-02T10:00:00Z", "cc_2,tomas.novak@example.net,2026-09-30T10:00:00Z"
+        )
+    )
+    with pytest.raises(MalformedInputError, match="requested_at after audit_at"):
+        run(custom_dataset, tmp_path)
+
+
+def test_evidence_file_captured_after_audit_cannot_add_findings(custom_dataset, tmp_path):
+    """A post-audit file that newly links a present record to the subject must not change cc_3."""
+    (custom_dataset / "evidence/records/late.json").write_text(
+        '{"records": [{"resource_id": "search_7999", "email": "aiko.sato@example.com", "observed_at": "2026-09-14T00:00:00Z"}]}'
+    )
+    with open(custom_dataset / "evidence_files.csv", "a") as fh:
+        fh.write("ev_late,evidence/records/late.json,search_service,2026-09-25T00:00:00Z\n")
+    run(custom_dataset, tmp_path)
+    status, steps = rows(tmp_path / "out.csv")["cc_3"]
+    assert status == "COMPLETE" and "search_7999" not in {s["resource_id"] for s in steps}
+
+
+def test_try_request_tool_requires_timestamps_and_handles_equal_boundary(custom_dataset):
+    import subprocess
+    import sys
+
+    from tests.conftest import CODE_DIR
+
+    tool = [sys.executable, str(CODE_DIR / "try_request.py"), "--dataset", str(custom_dataset)]
+    missing = subprocess.run(tool + ["--email", "a@b.com", "--text", "delete"], capture_output=True, text=True)
+    assert missing.returncode != 0 and "--requested-at" in missing.stderr
+
+    def status(requested, audit):
+        out = subprocess.run(
+            tool
+            + [
+                "--email",
+                "aiko.sato@example.com",
+                "--text",
+                "Please delete my account.",
+                "--requested-at",
+                requested,
+                "--audit-at",
+                audit,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert out.returncode == 0, out.stderr
+        return out.stdout.splitlines()[0]
+
+    capture = "2026-09-14T09:00:00Z"  # ev_c04 is captured exactly at this instant
+    # Inclusive capture boundary: evidence captured exactly at audit_at is admissible -> proven COMPLETE.
+    assert status("2026-09-01T10:00:00Z", capture).startswith("STATUS: COMPLETE")
+    # One second earlier the evidence does not exist yet -> nothing proves completion.
+    assert status("2026-09-01T10:00:00Z", "2026-09-14T08:59:59Z").startswith("STATUS: INCOMPLETE - insufficient evidence")
+    # requested_at == audit_at is valid input; the observations (08:10, 08:20) predate the request,
+    # so nothing was observed during the deletion window -> INCOMPLETE, never an unsupported COMPLETE.
+    assert status(capture, capture).startswith("STATUS: INCOMPLETE - insufficient evidence")
 
 
 def test_deterministic_output(custom_dataset, tmp_path):

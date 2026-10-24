@@ -73,6 +73,9 @@ class AuditOrchestrator:
                 warnings=[f"pipeline error: {exc!r}"],
             )
 
+    def _assess(self, views, request: DeletionRequest):
+        return self.risk_analyzer.analyze(views, request.audit_at) + self.policy_evaluator.evaluate(views, request.audit_at)
+
     def _audit(self, request: DeletionRequest) -> AuditResult:
         intent = self.intent_classifier.classify(request)
         if not intent.authorizes_deletion:
@@ -91,17 +94,24 @@ class AuditOrchestrator:
         profile = self.identity_resolver.resolve(request)
         since = request.requested_at if self.scope_to_request_window else None
         views = self.evidence_collector.collect(profile, request.audit_at, since)
-        assessments = self.risk_analyzer.analyze(views, request.audit_at) + self.policy_evaluator.evaluate(
-            views, request.audit_at
-        )
-        decision = self.status_decider.decide(intent, assessments)
+        assessed = self._assess(views, request)
+        in_window = {v.resource_id for v in views if v.in_window}
+        # Resources observed only before the request are not evidence of what the deletion left
+        # behind, so they produce no steps. A stale copy whose last known state still violates
+        # policy is unconfirmed rather than resolved: it blocks COMPLETE without becoming a finding.
+        assessments = [a for a in assessed if a.resource_id in in_window]
+        stale_violations = [a.resource_id for a in assessed if a.resource_id not in in_window and not a.compliant]
+        assessed_ids = {a.resource_id for a in assessed}
+        undeterminable = [v.resource_id for v in views if v.in_window and v.resource_id not in assessed_ids]
+        unresolved = sorted(undeterminable + stale_violations)
+        decision = self.status_decider.decide(intent, assessments, unresolved)
         steps = self.step_planner.plan(decision, assessments)
         result = AuditResult(request.case_id, decision, steps, assessments)
 
         if profile.primary_id is None:
             result.warnings.append("request email not found in current or historical identities")
-        if not assessments:
-            result.warnings.append("no admissible evidence linked to the subject")
+        if decision.insufficient_evidence:
+            result.warnings.append(decision.rationale)
         result.warnings += [f"{a.resource_id}: {a.rationale}" for a in assessments if a.verification is None]
         violations = self.invariant_validator.validate_result(result)
         if violations:

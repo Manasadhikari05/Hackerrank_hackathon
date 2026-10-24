@@ -78,3 +78,9 @@ def test_parse_json_object_rejects_garbage():
     with pytest.raises(ValueError):
         parse_json_object("no braces")
     assert parse_json_object('text {"a": 1} tail') == {"a": 1}
+
+
+@pytest.mark.parametrize("text", ["Can you look into my account?", "Something is wrong with my profile.", ""])
+def test_ambiguous_wording_never_authorises_deletion(text):
+    d = RULES.classify(make_request(text=text))
+    assert not d.authorizes_deletion and d.confidence < 0.8  # low confidence -> LLM fallback if enabled

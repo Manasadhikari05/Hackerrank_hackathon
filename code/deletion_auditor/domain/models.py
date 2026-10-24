@@ -171,8 +171,6 @@ class EvidenceRecord:
     redacted_marker: bool = False
     anonymized_marker: bool = False
     retention_until: datetime | None = None
-    # Capture time of an explicitly time-stamped section inside a later-exported bundle.
-    section_captured_at: datetime | None = None
     explicit: bool = True
     link_only: bool = False  # True when the row only links identity (e.g. data catalog)
     source: str = ""
@@ -236,6 +234,11 @@ class ResourceAssessment:
     evidence_id: str
     rationale: str = ""
 
+    @property
+    def proven(self) -> bool:
+        """True when a participant-visible evidence item available at audit_at backs the verdict."""
+        return bool(self.evidence_id)
+
 
 @dataclass(frozen=True)
 class AuditStep:
@@ -266,6 +269,8 @@ class AuditDecision:
     status: AuditStatus
     rationale: str
     confidence: float = 1.0
+    # INCOMPLETE because completion cannot be proven (not because a violation was found).
+    insufficient_evidence: bool = False
 
 
 @dataclass

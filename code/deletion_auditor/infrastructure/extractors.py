@@ -11,7 +11,6 @@ import json
 import logging
 import re
 import sqlite3
-from dataclasses import replace
 from typing import Any
 
 from ..domain.enums import EvidenceType, ResourceState
@@ -38,37 +37,32 @@ class JsonExtractor(EvidenceExtractor):
             log.warning("json evidence %s unreadable: %s", evidence.file_id, exc)
             return []
         records: list[EvidenceRecord] = []
-        self._walk(doc, evidence, None, None, None, "", records)
+        self._walk(doc, evidence, None, None, "", records)
         return records
 
-    def _walk(self, node: Any, evidence, system, ts, section_capture, path, out) -> None:
+    def _walk(self, node: Any, evidence, system, ts, path, out) -> None:
         if isinstance(node, dict):
+            # Nested snapshot sections carry their own captured_at: that is when the observation was
+            # made. Admissibility still uses the file's manifest capture time.
             for key in self.CONTEXT_TIME_KEYS:
                 parsed = parse_ts(node.get(key)) if isinstance(node.get(key), str) else None
                 if parsed:
                     ts = parsed
                     break
-            # Bundles embed snapshot sections with their own capture time. That explicit stamp is
-            # when this part of the evidence was captured (never later than the file itself).
-            section = parse_ts(node.get("captured_at")) if isinstance(node.get("captured_at"), str) else None
-            if section and section <= evidence.captured_at:
-                section_capture = section
             for key in self.CONTEXT_SYSTEM_KEYS:
                 if node.get(key) in KNOWN_SYSTEMS:
                     system = node[key]
             if "resource_id" in node:
                 rec = build_record(node, evidence, EvidenceType.JSON, default_system=system, default_time=ts, source=path)
-                if rec and section_capture and section_capture < evidence.captured_at:
-                    rec = replace(rec, section_captured_at=section_capture)
                 if rec:
                     out.append(rec)
                 return
             for key, value in node.items():
                 child_system = key if key in KNOWN_SYSTEMS else system
-                self._walk(value, evidence, child_system, ts, section_capture, f"{path}/{key}", out)
+                self._walk(value, evidence, child_system, ts, f"{path}/{key}", out)
         elif isinstance(node, list):
             for item in node:
-                self._walk(item, evidence, system, ts, section_capture, path, out)
+                self._walk(item, evidence, system, ts, path, out)
 
 
 class SqlSnapshotExtractor(EvidenceExtractor):
@@ -122,10 +116,12 @@ class LogExtractor(EvidenceExtractor):
     TRACE_RE = re.compile(r"\b((?:tr|rb)-[\w-]+)\b")
     SYSLOG_RE = re.compile(r"^\S+\s+<\d+>\d+\s+\S+\s+(\S+)\s+(\S+)")
     BRACKET_RE = re.compile(r"^\S+\s+\[(\w+)\]\s+\[([\w.-]+)\]\s+\[([\w-]+)\]\s+(\w+):")
+    # "2026-07-03T07:57:01Z | INFO | legal_service | tr-2637487 | retained_order_loaded | k="v" ..."
+    PIPE_RE = re.compile(r"^\S+\s*\|\s*(\w+)\s*\|\s*([\w.-]+)\s*\|\s*([\w-]+)\s*\|\s*(\w+)\s*\|")
     # Only query keys travel between lines of a trace; outcome fields (result, rows, ...) of
     # auxiliary lines such as cache_lookup must never leak into the record observation.
     CONTEXT_KEYS = frozenset(
-        {"lookup_key", "match_key", "correlation_key", "subject_key", "scan_key", "subject_ref", "query", "service"}
+        {"lookup_key", "match_key", "correlation_key", "subject_key", "scan_key", "subject_ref", "owner_key", "query", "service"}
     )
 
     def supports(self, evidence: EvidenceFile) -> bool:
@@ -147,7 +143,7 @@ class LogExtractor(EvidenceExtractor):
         if sm:
             fields["service"] = sm.group(1)
             fields["trace_id"] = sm.group(2)
-        bm = self.BRACKET_RE.match(line)
+        bm = self.BRACKET_RE.match(line) or self.PIPE_RE.match(line)
         if bm:
             fields["level"], fields["service"], fields["trace_id"], fields["event"] = bm.groups()
         for key, raw in self.KV_RE.findall(line):
@@ -203,7 +199,7 @@ class LogExtractor(EvidenceExtractor):
 
     # A completed read/query/scan returning the record proves it exists unless the line itself
     # carries an absence signal (rows=0, http 404, result=miss), which build_record applies.
-    OUTCOME_RE = re.compile(r"(_completed|_pii_scan|_read|record_lookup|_identity_scan)$")
+    OUTCOME_RE = re.compile(r"(_completed|_pii_scan|_read|_loaded|record_lookup|_identity_scan)$")
 
     def _record(self, fields: dict[str, Any], evidence: EvidenceFile, source: str, outcome: bool) -> EvidenceRecord | None:
         default_state = ResourceState.PRESENT if outcome else ResourceState.UNKNOWN

@@ -32,8 +32,7 @@ def test_json_bundle_section_capture_and_system_context():
     f = make_file("ev_b", "x.json", captured="2026-09-17T12:00:00Z")
     (r,) = JsonExtractor().extract(f, json.dumps(doc).encode())
     assert r.observed_at == ts("2026-09-15T12:00:00Z")
-    assert r.section_captured_at == ts("2026-09-15T12:00:00Z")
-    assert r.captured_at == ts("2026-09-17T12:00:00Z")
+    assert r.captured_at == ts("2026-09-17T12:00:00Z")  # manifest time governs admissibility
 
 
 def test_json_malformed_returns_empty():

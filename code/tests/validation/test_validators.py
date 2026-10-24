@@ -99,13 +99,12 @@ def test_evidence_reference_rules():
     assert "empty evidence_id" in v.validate("INCOMPLETE", future_with_id, AUDIT)[0]
 
 
-def test_section_capture_time_makes_bundle_citable_only_for_that_resource():
-    cat = EvidenceCatalog({"ev_b": ts("2026-09-30T00:00:00Z")})
-    cat.add_section("ev_b", "account_1", ts("2026-09-15T00:00:00Z"))
-    v = EvidenceReferenceValidator(cat)
-    assert v.validate("COMPLETE", [step(1, "VERIFICATION", "VERIFY_RECORD_ABSENT", "ABSENT", "ev_b")], AUDIT) == []
-    other = [step(1, "VERIFICATION", "VERIFY_RECORD_ABSENT", "ABSENT", "ev_b", rid="account_2")]
-    assert v.validate("COMPLETE", other, AUDIT)
+def test_bundle_exported_after_audit_is_never_citable():
+    """Regression: a bundle whose manifest capture time is after audit_at was cited because an inner
+    section carried an earlier stamp. The manifest time is authoritative (AGENTS.md 6.6)."""
+    v = EvidenceReferenceValidator(EvidenceCatalog({"ev_b": ts("2026-09-30T00:00:00Z")}))
+    errs = v.validate("COMPLETE", [step(1, "VERIFICATION", "VERIFY_RECORD_ABSENT", "ABSENT", "ev_b")], AUDIT)
+    assert errs and "after audit_at" in errs[0]
 
 
 def test_order_and_numbering():
@@ -128,6 +127,35 @@ def test_phase_state_mismatch():
 def test_decision_invariants():
     v = DecisionInvariantValidator()
     assert v.validate("COMPLETE", GOOD_INCOMPLETE)  # findings in a COMPLETE case
-    assert v.validate("INCOMPLETE", GOOD_INCOMPLETE[2:])  # no finding
     assert v.validate("INCOMPLETE", GOOD_INCOMPLETE[:1])  # finding without remediation
     assert v.validate("INCOMPLETE", GOOD_INCOMPLETE[:2])  # remediation without verification
+    assert v.validate("INCOMPLETE", GOOD_INCOMPLETE[1:])  # remediation without a supporting finding
+
+
+def test_complete_with_no_proof_is_rejected():
+    """Regression: an audit that found nothing used to be written as COMPLETE,[]."""
+    errs = DecisionInvariantValidator().validate("COMPLETE", [])
+    assert errs and "at least one evidence-backed verification" in errs[0]
+
+
+def test_insufficient_evidence_incomplete_rows_are_valid():
+    v = DecisionInvariantValidator()
+    assert v.validate("INCOMPLETE", []) == []  # nothing linkable: cannot claim completion
+    assert v.validate("INCOMPLETE", GOOD_INCOMPLETE[2:]) == []  # only checks that must pass
+
+
+def test_model_level_incomplete_without_violation_must_be_flagged():
+    from deletion_auditor.domain.enums import AuditStatus
+    from deletion_auditor.domain.models import AuditDecision, AuditResult
+
+    v = DecisionInvariantValidator()
+    unflagged = AuditResult("c", AuditDecision(AuditStatus.INCOMPLETE, "?"))
+    flagged = AuditResult("c", AuditDecision(AuditStatus.INCOMPLETE, "insufficient", insufficient_evidence=True))
+    assert v.validate_result(unflagged)
+    assert v.validate_result(flagged) == []
+
+
+def test_file_validation_rejects_complete_without_steps(tmp_path):
+    p = write(tmp_path, [["case_1", "COMPLETE", "[]"]])
+    with pytest.raises(OutputValidationError):
+        validate_output_file(p, [make_request("case_1")], CATALOG)

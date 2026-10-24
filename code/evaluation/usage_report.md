@@ -19,21 +19,22 @@ Non-LLM components used in the run:
 | Tesseract OCR 5 via `pytesseract` | Reads text from screenshot evidence | local |
 
 <!-- BEGIN GENERATED-USAGE -->
-_Generated on 2026-10-24 16:00 UTC from the full run that wrote `output.csv`._
+_Generated on 2026-10-24 16:24 UTC from the full run that wrote `output.csv`._
 
 | Item | Value |
 |---|---|
 | Requests processed | 518 |
-| Status counts | COMPLETE: 152, INCOMPLETE: 356, NOT_APPLICABLE: 10 |
-| Wall-clock time | 8.22 s |
+| Status counts | COMPLETE: 148, INCOMPLETE: 360, NOT_APPLICABLE: 10 |
+| Wall-clock time | 8.2 s |
 | Model calls | 0 (LLM disabled; deterministic pipeline) |
 <!-- END GENERATED-USAGE -->
 
 ## Why no LLM in the final run
 
-- On the 32 public samples the deterministic pipeline already reaches 100% status accuracy, 100% step
-  precision and 100% `evidence_id` accuracy. Every remaining miss is a resource absent from participant
-  evidence, and a model cannot recover it without inventing data.
+- On the 32 public samples the deterministic pipeline reaches 100% step precision, 100% `evidence_id`
+  accuracy and zero false COMPLETE decisions. Its status accuracy is 90.6%; the 3 misses are
+  insufficient-evidence cases. Every missed step is a resource that has no identifier link in participant
+  evidence available at `audit_at`. A model cannot recover such a link without inventing data.
 - Determinism makes the output reproducible bit-for-bit, which an integration test asserts, and easy to
   audit. That matters for a compliance artifact.
 

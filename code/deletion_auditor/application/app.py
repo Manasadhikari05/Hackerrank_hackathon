@@ -145,8 +145,6 @@ class AuditApplication:
             self.catalog.add(a.activity_id, a.event_time)
         for c in changes:
             self.catalog.add(c.audit_id, c.event_time)
-        for (ev, rid), when in collector.section_capture_times().items():
-            self.catalog.add_section(ev, rid, when)
 
         self.run_logger.log("index", {k: v for k, v in sorted(collector.stats.items())})
         self._orchestrator = AuditOrchestrator(

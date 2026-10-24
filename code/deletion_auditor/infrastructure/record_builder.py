@@ -39,6 +39,7 @@ LOOKUP_KEYS = frozenset(
         "subject_key",
         "scan_key",
         "subject_ref",
+        "owner_key",
         "query",
         "subject_reference_lookup",
     }

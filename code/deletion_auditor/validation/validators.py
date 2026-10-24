@@ -37,22 +37,9 @@ class EvidenceCatalog:
     """Every participant-visible evidence id with the time it became available."""
 
     times: dict[str, datetime] = field(default_factory=dict)
-    # (evidence_id, resource_id) -> capture time of the snapshot section describing that resource,
-    # for bundles that embed explicitly time-stamped sections.
-    section_times: dict[tuple[str, str], datetime] = field(default_factory=dict)
 
     def add(self, evidence_id: str, available_at: datetime) -> None:
         self.times[evidence_id] = available_at
-
-    def add_section(self, evidence_id: str, resource_id: str, captured_at: datetime) -> None:
-        key = (evidence_id, resource_id)
-        if key not in self.section_times or captured_at < self.section_times[key]:
-            self.section_times[key] = captured_at
-
-    def available_at(self, evidence_id: str, resource_id: str) -> datetime | None:
-        if evidence_id not in self.times:
-            return None
-        return self.section_times.get((evidence_id, resource_id), self.times[evidence_id])
 
 
 class StepOrderValidator:
@@ -103,7 +90,7 @@ class EvidenceReferenceValidator:
                 if not ev:
                     errors.append(f"{case_id}: step {step.get('step_no')} ({phase}) must cite evidence")
                     continue
-                when = self._catalog.available_at(ev, step.get("resource_id", ""))
+                when = self._catalog.times.get(ev)
                 if when is None:
                     errors.append(f"{case_id}: step {step.get('step_no')} cites unknown evidence {ev!r}")
                 elif audit_at is not None and when > audit_at:
@@ -121,12 +108,13 @@ class DecisionInvariantValidator:
         phases = [s.get("phase") for s in steps]
         if status == AuditStatus.NOT_APPLICABLE.value and steps:
             errors.append(f"{case_id}: NOT_APPLICABLE must have steps_json=[]")
-        if status == AuditStatus.COMPLETE.value and any(p != StepPhase.VERIFICATION.value for p in phases):
-            errors.append(f"{case_id}: COMPLETE may contain verification steps only")
+        if status == AuditStatus.COMPLETE.value:
+            if any(p != StepPhase.VERIFICATION.value for p in phases):
+                errors.append(f"{case_id}: COMPLETE may contain verification steps only")
+            if not steps:
+                # A COMPLETE row must *prove* the required state; an empty array proves nothing.
+                errors.append(f"{case_id}: COMPLETE must contain at least one evidence-backed verification step")
         if status == AuditStatus.INCOMPLETE.value:
-            findings = [s for s in steps if s.get("phase") == StepPhase.FINDING.value]
-            if not findings:
-                errors.append(f"{case_id}: INCOMPLETE must report at least one finding")
 
             def resources(phase: StepPhase) -> set[tuple]:
                 return {(s.get("system_id"), s.get("resource_id")) for s in steps if s.get("phase") == phase.value}
@@ -134,18 +122,27 @@ class DecisionInvariantValidator:
             fixed = resources(StepPhase.REMEDIATION)
             found = resources(StepPhase.FINDING)
             verified = resources(StepPhase.VERIFICATION)
+            # An INCOMPLETE row may have no finding (insufficient evidence), but every remediation
+            # must answer a cited finding and every finding/remediation must be verified.
             for res in sorted(found - fixed):
                 errors.append(f"{case_id}: finding {res} has no remediation step")
+            for res in sorted(fixed - found):
+                errors.append(f"{case_id}: remediation {res} has no supporting finding")
             for res in sorted(fixed - verified):
                 errors.append(f"{case_id}: remediated {res} has no verification step")
         return errors
 
     def validate_result(self, result: AuditResult) -> list[str]:
-        """Model-level invariant: COMPLETE never coexists with an unresolved policy violation."""
+        """Model-level invariants on top of the row checks."""
         errors = self.validate(result.status.value, [s.to_dict() for s in result.steps], result.case_id)
         open_items = [a for a in result.findings if not a.compliant]
-        if result.status == AuditStatus.COMPLETE and open_items:
-            errors.append(f"{result.case_id}: marked COMPLETE with {len(open_items)} unresolved item(s)")
+        if result.status == AuditStatus.COMPLETE:
+            if open_items:
+                errors.append(f"{result.case_id}: marked COMPLETE with {len(open_items)} unresolved item(s)")
+            if any(not a.proven for a in result.findings):
+                errors.append(f"{result.case_id}: marked COMPLETE with unproven assessment(s)")
+        if result.status == AuditStatus.INCOMPLETE and not open_items and not result.decision.insufficient_evidence:
+            errors.append(f"{result.case_id}: INCOMPLETE without a violation must be flagged insufficient evidence")
         return errors
 
 

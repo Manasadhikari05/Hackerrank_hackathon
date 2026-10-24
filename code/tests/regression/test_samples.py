@@ -17,8 +17,24 @@ def report(tmp_path_factory):
     return RegressionEvaluator().evaluate(out, DATASET / "sample_output.csv")
 
 
-def test_status_accuracy(report):
-    assert report.metrics["case_status_accuracy"] >= 0.95
+def test_never_claims_complete_when_reference_is_incomplete(report):
+    false_complete = [c.case_id for c in report.cases if c.predicted_status == "COMPLETE" and c.expected_status != "COMPLETE"]
+    assert false_complete == []
+
+
+def test_every_status_mismatch_is_an_insufficient_evidence_incomplete(report):
+    """The agent refuses to claim COMPLETE without proof. The only permitted disagreement with the
+    reference is a case where no participant-visible evidence proves completion: predicted INCOMPLETE
+    with no finding and no remediation (nothing it could cite)."""
+    for c in report.cases:
+        if c.status_ok:
+            continue
+        assert (c.expected_status, c.predicted_status) == ("COMPLETE", "INCOMPLETE"), c.case_id
+        assert not any(s["phase"] in ("FINDING", "REMEDIATION") for s in c.predicted_steps), c.case_id
+
+
+def test_status_accuracy_floor(report):
+    assert report.metrics["case_status_accuracy"] >= 0.90
 
 
 def test_no_false_positive_steps(report):

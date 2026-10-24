@@ -29,6 +29,7 @@ class ResourceView:
     resource_id: str
     records: list[EvidenceRecord] = field(default_factory=list)
     link_evidence: list[str] = field(default_factory=list)
+    in_window: bool = True  # observed at/after requested_at
 
     @property
     def category(self) -> DataCategory | None:
@@ -43,19 +44,9 @@ class ResourceView:
         return SYSTEM_DEFAULT_CATEGORY.get(self.system_id)
 
     def citable(self, audit_at: datetime, predicate) -> EvidenceRecord | None:
-        """Latest record that proves ``predicate`` and was captured at or before audit_at.
-
-        Preference: evidence files captured by audit_at; only if none exists, a section of a later
-        bundle whose own explicit capture stamp is at or before audit_at.
-        """
-        proving = [r for r in self.informative() if predicate(r)]
-        for tier in (
-            [r for r in proving if r.captured_at <= audit_at],
-            [r for r in proving if r.section_captured_at is not None and r.section_captured_at <= audit_at],
-        ):
-            if tier:
-                return max(tier, key=lambda r: (r.observed_at, r.captured_at, r.evidence_id))
-        return None
+        """Latest record that proves ``predicate`` from an evidence item captured at or before audit_at."""
+        proving = [r for r in self.informative() if predicate(r) and r.captured_at <= audit_at]
+        return max(proving, key=lambda r: (r.observed_at, r.captured_at, r.evidence_id)) if proving else None
 
     def informative(self) -> list[EvidenceRecord]:
         return [
@@ -98,9 +89,7 @@ class EvidenceCollector:
         self,
         repository: EvidenceRepository,
         extractors: list[EvidenceExtractor],
-        link_with_later_evidence: bool = True,
     ):
-        self.link_with_later_evidence = link_with_later_evidence
         self._repository = repository
         self._extractors = extractors
         self._by_resource: dict[str, list[EvidenceRecord]] = defaultdict(list)
@@ -130,17 +119,6 @@ class EvidenceCollector:
         self.stats["records_activity"] += len(extra_records or [])
         self._indexed = True
 
-    def section_capture_times(self) -> dict[tuple[str, str], datetime]:
-        """Capture time per (evidence, resource) where a record carries a section-level stamp
-        earlier than its file's manifest time."""
-        out: dict[tuple[str, str], datetime] = {}
-        for rid, records in self._by_resource.items():
-            for r in records:
-                if r.section_captured_at is not None:
-                    key = (r.evidence_id, rid)
-                    out[key] = min(out.get(key, r.section_captured_at), r.section_captured_at)
-        return out
-
     def _add(self, records: list[EvidenceRecord]) -> None:
         for r in records:
             self._by_resource[r.resource_id].append(r)
@@ -150,9 +128,10 @@ class EvidenceCollector:
     def collect(self, profile: IdentityProfile, audit_at: datetime, since: datetime | None = None) -> list[ResourceView]:
         """Resources linked to ``profile`` with their admissible observations.
 
-        ``since`` (the request time) scopes the audit to records observed during the deletion
-        window: a resource seen only months before the request says nothing about what the
-        deletion workflow left behind.
+        ``since`` (the request time) marks resources with no observation during the deletion
+        window as ``in_window=False``. The orchestrator verifies only in-window resources but still
+        reports an out-of-window resource whose last known state violates policy, so a stale but
+        unresolved copy can never be silently dropped.
         """
         if not self._indexed:
             raise RuntimeError("EvidenceCollector.index() must run before collect()")
@@ -163,22 +142,22 @@ class EvidenceCollector:
 
         views: list[ResourceView] = []
         for rid in sorted(candidate_ids):
-            admissible = [r for r in self._by_resource[rid] if self._admissible(r, audit_at)]
-            # Ownership of a resource id is time-invariant (ids are never reused), so a later
-            # catalogue entry may tell us *which* record is the subject's. Its *state* below is
-            # still reconstructed exclusively from observations made at or before audit_at.
-            pool = self._by_resource[rid] if self.link_with_later_evidence else admissible
-            links = sorted({r.evidence_id for r in pool if r.identifiers & tokens})
-            if not links or not admissible:
+            # Both the link to the subject and the state come only from admissible evidence, so
+            # nothing captured after audit_at can change the answer (AGENTS.md 6.2 / 6.5).
+            admissible = [r for r in self._by_resource[rid] if self.admissible(r, audit_at)]
+            links = sorted({r.evidence_id for r in admissible if r.identifiers & tokens})
+            if not links:
                 continue
-            if since is not None and not any(r.observed_at >= since and not r.link_only for r in admissible):
-                continue
-            views.append(ResourceView(admissible[0].system_id, rid, list(admissible), links))
+            in_window = since is None or any(r.observed_at >= since and not r.link_only for r in admissible)
+            views.append(ResourceView(admissible[0].system_id, rid, list(admissible), links, in_window))
         return views
 
     @staticmethod
-    def _admissible(record: EvidenceRecord, audit_at: datetime) -> bool:
-        # A log line or snapshot section observed before audit_at describes the state at that
-        # time even if the export file was produced later. Whether it may be *cited* is a
-        # separate question (see ResourceView.citable).
-        return record.observed_at <= audit_at
+    def admissible(record: EvidenceRecord, audit_at: datetime) -> bool:
+        """Evidence that existed at audit_at: observed by then *and* its evidence item captured by then.
+
+        The manifest's captured_at is authoritative (AGENTS.md 6.6: never cite an evidence item
+        captured after audit_at). A bundle or log exported later is excluded even if it describes
+        earlier events, so later evidence can never change the answer.
+        """
+        return record.observed_at <= audit_at and record.captured_at <= audit_at
