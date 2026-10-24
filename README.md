@@ -9,6 +9,10 @@
 > python3 code/evaluation/main.py --tests --full     # tests + sample/custom regression + full-run validation
 > ```
 >
+> ```bash
+> python3 code/evaluation/validate_submission.py --rerun   # independent output/log/zip validation
+> ```
+>
 > Reports: [`code/evaluation/evaluation_report.md`](./code/evaluation/evaluation_report.md),
 > [`code/evaluation/usage_report.md`](./code/evaluation/usage_report.md). CI: `.github/workflows/ci.yml`.
 

@@ -43,7 +43,7 @@ from deletion_auditor.interfaces import (
     ModelClient,
     OutputWriter,
 )
-from tests.conftest import CUSTOM_DATASET, make_file, make_request
+from tests.conftest import CUSTOM_DATASET, OFFICIAL_RULES, make_file, make_request
 
 INTERP = RuleBasedInterpreter()
 EXTRACTORS = [
@@ -104,7 +104,7 @@ def test_repositories_contract():
     idr = CsvIdentityRepository(ds / "user_identities.csv", ds / "user_audit_log.csv")
     assert all(isinstance(i, IdentitySnapshot) for i in idr.load_identities())
     assert all(isinstance(c, IdentityChange) for c in idr.load_identity_changes())
-    assert all(isinstance(r, DeletionRule) for r in CsvPolicyRepository(ds / "deletion_rules.csv").load_rules())
+    assert all(isinstance(r, DeletionRule) for r in CsvPolicyRepository(OFFICIAL_RULES).load_rules())
     assert all(isinstance(a, ActivityEvent) for a in CsvActivityRepository(ds / "system_activity.csv").load_activities())
     ev = FileEvidenceRepository(ds)
     files = ev.list_evidence()

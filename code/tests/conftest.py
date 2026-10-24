@@ -14,7 +14,8 @@ sys.path.insert(0, str(CODE_DIR))
 from deletion_auditor.domain.models import DeletionRequest, EvidenceFile  # noqa: E402
 
 DATASET = REPO_ROOT / "dataset"
-CUSTOM_DATASET = CODE_DIR / "evaluation" / "custom_cases" / "dataset"
+CUSTOM_DATASET = CODE_DIR / "evaluation" / "custom_cases" / "fixture_data"
+OFFICIAL_RULES = DATASET / "deletion_rules.csv"
 CUSTOM_EXPECTED = CODE_DIR / "evaluation" / "custom_cases" / "expected_output.csv"
 
 
@@ -39,8 +40,11 @@ def make_request(
 @pytest.fixture
 def custom_dataset(tmp_path) -> Path:
     """A writable copy of the fictional custom-case dataset (tests may corrupt it)."""
+    if not OFFICIAL_RULES.exists():
+        pytest.skip("custom cases use the official dataset/deletion_rules.csv, which is not present")
     dst = tmp_path / "dataset"
     shutil.copytree(CUSTOM_DATASET, dst)
+    shutil.copy(OFFICIAL_RULES, dst / "deletion_rules.csv")  # the fixture ships no copy of challenge data
     return dst
 
 

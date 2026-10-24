@@ -20,6 +20,7 @@ python3 code/main.py                                      # writes ./output.csv 
 | `python3 code/try_request.py --email E --text T --requested-at TS --audit-at TS` | Audit one hand-entered request (timestamps required) |
 | `python3 -m pip install -r code/requirements-dev.txt && python3 -m pytest code/tests` | Test suite |
 | `python3 code/evaluation/main.py --tests --full --write-report` | Full evaluation workflow; refreshes the reports |
+| `python3 code/evaluation/validate_submission.py --rerun --write-report` | Independent check of output.csv, log.txt and code.zip, plus a determinism check; writes `evaluation/validation_report.md` |
 
 Python 3.10+ is required. No API key is needed. The LLM path is opt-in through `AUDIT_USE_LLM=1` and
 `OPENAI_API_KEY`, both read from the environment only.
@@ -115,7 +116,7 @@ code/
 
 ## Tests and CI
 
-`code/tests` holds 142 tests plus one opt-in live-LLM test.
+`code/tests` holds 146 tests plus one opt-in live-LLM test.
 
 | Layer | Examples |
 |---|---|

@@ -78,7 +78,7 @@ class ActivityEvidenceAdapter:
         return None
 
     @staticmethod
-    def aliases(events: list[ActivityEvent]) -> dict[str, tuple[str, str]]:
+    def aliases(events: list[ActivityEvent]) -> dict[str, tuple]:
         """Business-reference aliases published by the data catalog, e.g. NST-... -> export_1842."""
         out: dict[str, tuple[str, str]] = {}
         for ev in events:
@@ -86,5 +86,5 @@ class ActivityEvidenceAdapter:
                 continue
             for rid, alias in ALIAS_RE.findall(ev.details):
                 if alias != rid:
-                    out[alias] = (rid, ev.target_system)
+                    out[alias] = (rid, ev.target_system, ev.event_time)
         return out

@@ -29,11 +29,14 @@ sys.path.insert(0, str(CODE_DIR))
 from deletion_auditor.application import AppConfig, AuditApplication  # noqa: E402
 from deletion_auditor.evaluation import RegressionEvaluator, RegressionReport  # noqa: E402
 
-CUSTOM_DATASET = EVAL_DIR / "custom_cases" / "dataset"
+CUSTOM_DATASET = EVAL_DIR / "custom_cases" / "fixture_data"
+OFFICIAL_RULES = REPO_ROOT / "dataset" / "deletion_rules.csv"
 CUSTOM_EXPECTED = EVAL_DIR / "custom_cases" / "expected_output.csv"
 
 
-def run_suite(name: str, dataset: Path, requests: str, answers: Path, ocr: bool) -> tuple[RegressionReport, object]:
+def run_suite(
+    name: str, dataset: Path, requests: str, answers: Path, ocr: bool, rules: Path | None = None
+) -> tuple[RegressionReport, object]:
     RUNS_DIR.mkdir(exist_ok=True)
     out = RUNS_DIR / f"{name}_predictions.csv"
     cfg = AppConfig(
@@ -42,6 +45,7 @@ def run_suite(name: str, dataset: Path, requests: str, answers: Path, ocr: bool)
         output_path=out,
         run_log_path=RUNS_DIR / f"{name}_run_log.jsonl",
         enable_ocr=ocr,
+        rules_path=rules,
     )
     summary = AuditApplication(cfg).run(validate=True)  # raises OutputValidationError on contract breach
     return RegressionEvaluator().evaluate(out, answers), summary
@@ -123,7 +127,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("== dataset/ not present: sample regression skipped (custom cases still run)")
     print("== custom evaluation cases")
-    custom, _ = run_suite("custom", CUSTOM_DATASET, "deletion_requests.csv", CUSTOM_EXPECTED, ocr=False)
+    if not OFFICIAL_RULES.exists():
+        print("EVALUATION FAILED: custom cases need the official dataset/deletion_rules.csv", file=sys.stderr)
+        return 1
+    custom, _ = run_suite("custom", CUSTOM_DATASET, "deletion_requests.csv", CUSTOM_EXPECTED, ocr=False, rules=OFFICIAL_RULES)
     for label, rep in (("sample", sample), ("custom", custom)):
         if rep is None:
             continue

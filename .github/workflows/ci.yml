@@ -85,10 +85,10 @@ jobs:
           FULL_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.full_run }}
         run: |
           if [ ! -f dataset/sample_output.csv ]; then
-            echo "dataset/ not in repository: running custom evaluation cases only"
-            python code/evaluation/main.py
+            echo "dataset/ not in repository: evaluation needs the official dataset (including deletion_rules.csv); skipped"
           elif [ "$FULL_RUN" = "true" ]; then
             python code/evaluation/main.py --full --require-dataset
+            python code/evaluation/validate_submission.py --rerun
           else
             python code/evaluation/main.py --require-dataset
           fi

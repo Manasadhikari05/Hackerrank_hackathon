@@ -20,6 +20,14 @@ class AppConfig:
     use_llm: bool = field(default_factory=lambda: os.environ.get("AUDIT_USE_LLM") == "1")
     llm_model: str = field(default_factory=lambda: os.environ.get("AUDIT_LLM_MODEL", "gpt-4o-mini"))
 
+    # Policy file; defaults to the dataset's deletion_rules.csv. The custom evaluation cases ship no copy
+    # of the challenge data and point this at the official dataset/deletion_rules.csv instead.
+    rules_path: Path | None = None
+
+    @property
+    def effective_rules_path(self) -> Path:
+        return self.rules_path or self.dataset_dir / "deletion_rules.csv"
+
     @property
     def requests_path(self) -> Path:
         return self.dataset_dir / self.requests_file

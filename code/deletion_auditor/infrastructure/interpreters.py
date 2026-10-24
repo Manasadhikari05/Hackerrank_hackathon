@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from ..domain.catalog import system_for_resource
@@ -49,11 +50,12 @@ class RuleBasedInterpreter(EvidenceInterpreter):
     to resource ids; it is built from data-catalog activity rows, never from labels.
     """
 
-    def __init__(self, aliases: dict[str, tuple[str, str]] | None = None):
-        # alias -> (resource_id, system_id)
+    def __init__(self, aliases: dict[str, tuple] | None = None):
+        # alias -> (resource_id, system_id[, published_at]). published_at is when the data catalog made
+        # the alias known; a document read through an alias is only admissible from that time on.
         self._aliases = aliases or {}
 
-    def set_aliases(self, aliases: dict[str, tuple[str, str]]) -> None:
+    def set_aliases(self, aliases: dict[str, tuple]) -> None:
         self._aliases = dict(aliases)
 
     def interpret(self, raw_content: str, evidence: EvidenceFile) -> list[EvidenceRecord]:
@@ -132,10 +134,12 @@ class RuleBasedInterpreter(EvidenceInterpreter):
         for m in RESOURCE_ID_RE.finditer(text):
             found[m.group(0)] = None
         origin_system = evidence.origin
-        for alias, (rid, system) in self._aliases.items():
+        published: dict[str, datetime] = {}
+        for alias, (rid, system, *when) in self._aliases.items():
             # Aliases such as "user_17" are only meaningful on screens of the owning system.
             if alias in text and (not alias.startswith("user_") or system == origin_system):
-                found.setdefault(rid, alias)
+                if found.setdefault(rid, alias) == alias and when and when[0] is not None:
+                    published[rid] = when[0]
         if not found:
             return []
         doc_tokens = tokens_from_text(text)
@@ -157,13 +161,17 @@ class RuleBasedInterpreter(EvidenceInterpreter):
             if single_subject:
                 content = text
             else:
-                content = " ".join(ln for ln in text.splitlines() if rid in ln)
+                key = found[rid] or rid  # alias-derived resources are named by their alias in the text
+                content = " ".join(ln for ln in text.splitlines() if key in ln)
             fields: dict[str, object] = {"resource_id": rid, "content": content}
             if category and rid.startswith(("support_", "object_")):
                 fields["record_type"] = category.value
             if retention and rid.startswith("audit_record_"):
                 fields["retention_until"] = retention.strftime("%Y-%m-%dT%H:%M:%SZ")
             rec = build_record(fields, evidence, _evidence_type(evidence), source="text:document")
+            if rec and rid in published and published[rid] > rec.captured_at:
+                # The link document -> resource did not exist before the catalog published it.
+                rec = replace(rec, captured_at=published[rid])
             if rec:
                 records.append(rec)
         return records

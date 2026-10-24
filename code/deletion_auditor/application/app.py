@@ -97,7 +97,7 @@ def default_dependencies(config: AppConfig) -> Dependencies:
     return Dependencies(
         requests=CsvRequestRepository(config.requests_path),
         identities=CsvIdentityRepository(ds / "user_identities.csv", ds / "user_audit_log.csv"),
-        policy=CsvPolicyRepository(ds / "deletion_rules.csv"),
+        policy=CsvPolicyRepository(config.effective_rules_path),
         activities=CsvActivityRepository(ds / "system_activity.csv"),
         evidence=FileEvidenceRepository(ds),
         writer=CsvOutputWriter(),

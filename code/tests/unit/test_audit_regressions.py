@@ -214,3 +214,17 @@ def test_undetermined_record_gets_required_check_but_no_finding():
     assert [s.operation for s in StepPlanner().plan(done, [ok], [(Operation.VERIFY_RESTORE_BLOCKED, "backup_service", "b")])] == [
         Operation.VERIFY_RECORD_ABSENT
     ]
+
+
+def test_alias_link_is_not_admissible_before_the_catalog_published_it():
+    """Regression: catalog aliases were applied regardless of time, so a document could be attributed
+    to a resource before the data catalog had linked them."""
+    from deletion_auditor.infrastructure.interpreters import RuleBasedInterpreter
+
+    alias_time = ts("2026-07-18T11:07:01Z")
+    interp = RuleBasedInterpreter({"NST-0001": ("export_42", "export_service", alias_time)})
+    doc = make_file(path="s.pdf", origin="account_history_service", captured="2026-07-18T11:00:00Z")
+    (r,) = interp.interpret("STATEMENT\nNST-0001\nana@example.com\nbob@example.com\n", doc)
+    assert r.captured_at == alias_time  # admissible only once both document and alias exist
+    assert not EvidenceCollector.admissible(r, ts("2026-07-18T11:05:00Z"))
+    assert EvidenceCollector.admissible(r, ts("2026-07-18T11:10:00Z"))
