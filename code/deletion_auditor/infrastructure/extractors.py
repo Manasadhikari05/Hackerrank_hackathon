@@ -16,6 +16,7 @@ from typing import Any
 from ..domain.enums import EvidenceType, ResourceState
 from ..domain.models import EvidenceFile, EvidenceRecord, parse_ts
 from ..interfaces.processing import EvidenceExtractor, EvidenceInterpreter
+from .interpreters import PANEL_MARKER
 from .record_builder import KNOWN_SYSTEMS, build_record
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,26 @@ class SqlSnapshotExtractor(EvidenceExtractor):
     def supports(self, evidence: EvidenceFile) -> bool:
         return evidence.extension == "sql"
 
+    @staticmethod
+    def _expand_json_columns(fields: dict[str, Any]) -> dict[str, Any]:
+        """Replica tables store each record as a JSON document (``record_json``). Its structured fields
+        (restore_allowed, enabled, message_text, ...) must be read as fields, not as opaque text."""
+        out: dict[str, Any] = {}
+        documents: list[dict[str, Any]] = []
+        for key, value in fields.items():
+            if isinstance(value, str) and value.lstrip().startswith("{"):
+                try:
+                    parsed = json.loads(value)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    documents.append(parsed)
+                    continue
+            out[key] = value
+        for doc in documents:
+            out.update(doc)  # the stored record is authoritative over wrapper columns
+        return out
+
     def extract(self, evidence: EvidenceFile, content: bytes) -> list[EvidenceRecord]:
         conn = sqlite3.connect(":memory:")
         try:
@@ -96,6 +117,7 @@ class SqlSnapshotExtractor(EvidenceExtractor):
                     fields = dict(zip(cols, row, strict=True))
                     # Row update time is not observation time; the snapshot is.
                     fields.pop("updated_at", None)
+                    fields = self._expand_json_columns(fields)
                     rec = build_record(fields, evidence, EvidenceType.SQL, default_time=captured, source=f"sql:{table}")
                     if rec:
                         records.append(rec)
@@ -253,9 +275,16 @@ class ImageOcrExtractor(EvidenceExtractor):
 
     EXTENSIONS = ("png", "jpg", "jpeg", "webp")
 
-    def __init__(self, interpreter: EvidenceInterpreter, ocr=None):
+    # Admin consoles show a list on the left and a detail panel for the *selected* record on the right.
+    # Full-page OCR interleaves table columns, so the panel is OCR'd on its own to keep its labelled
+    # fields (Status, Owner, ...) attached to the record they describe.
+    PANEL_BOX = (0.79, 0.27, 1.0, 0.62)  # fractions of width/height, measured on the supplied screens
+
+    def __init__(self, interpreter: EvidenceInterpreter, ocr=None, panel_ocr=None):
         self._interpreter = interpreter
         self._ocr = ocr or self._tesseract
+        # An injected page OCR (tests) gets no panel pass unless one is injected explicitly.
+        self._panel_ocr = panel_ocr if panel_ocr is not None else (None if ocr else self._tesseract_panel)
 
     @staticmethod
     def _tesseract(content: bytes) -> str:
@@ -263,6 +292,16 @@ class ImageOcrExtractor(EvidenceExtractor):
         from PIL import Image
 
         return pytesseract.image_to_string(Image.open(io.BytesIO(content)))
+
+    @classmethod
+    def _tesseract_panel(cls, content: bytes) -> str:
+        import pytesseract
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(content))
+        w, h = image.size
+        x0, y0, x1, y1 = cls.PANEL_BOX
+        return pytesseract.image_to_string(image.crop((int(w * x0), int(h * y0), int(w * x1), int(h * y1))))
 
     def supports(self, evidence: EvidenceFile) -> bool:
         return evidence.extension in self.EXTENSIONS
@@ -273,4 +312,9 @@ class ImageOcrExtractor(EvidenceExtractor):
         except Exception as exc:  # missing binary, unreadable image, ...
             log.warning("OCR failed for %s: %s", evidence.file_id, exc)
             return []
+        if self._panel_ocr is not None:
+            try:
+                text += f"\n{PANEL_MARKER}\n" + self._panel_ocr(content)
+            except Exception as exc:
+                log.warning("panel OCR failed for %s: %s", evidence.file_id, exc)
         return self._interpreter.interpret(text, evidence)

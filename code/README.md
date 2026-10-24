@@ -115,7 +115,7 @@ code/
 
 ## Tests and CI
 
-`code/tests` holds 139 tests plus one opt-in live-LLM test.
+`code/tests` holds 142 tests plus one opt-in live-LLM test.
 
 | Layer | Examples |
 |---|---|

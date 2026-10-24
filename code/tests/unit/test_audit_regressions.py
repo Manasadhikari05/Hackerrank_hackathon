@@ -146,3 +146,71 @@ def test_pipe_delimited_log_dialect():
     assert not recs["export_5"].exposed_kinds  # owner_key is a query key, not stored content
     assert recs["legal_hold_7"].state == ResourceState.PRESENT and "user:user_2" in recs["legal_hold_7"].identifiers
     assert recs["analytics_3"].state == ResourceState.PRESENT and "email" in recs["analytics_3"].exposed_kinds
+
+
+# ---- 4. final review: replica JSON payloads, screenshot detail panels, required checks -----------
+def test_sql_json_payload_columns_are_parsed():
+    """Regression: replica tables store the record in a record_json column; its restore_allowed /
+    enabled / [REDACTED] fields were ignored, producing false findings (e.g. a redacted ticket
+    reported as a remaining record)."""
+    from deletion_auditor.domain.enums import DataCategory
+    from deletion_auditor.infrastructure.extractors import SqlSnapshotExtractor
+
+    sql = b"""CREATE TABLE customer_data_primary (resource_id TEXT, origin_system TEXT, record_json TEXT);
+INSERT INTO customer_data_primary VALUES ('backup_1','backup_service','{"resource_id":"backup_1","subject_reference":"user_5","restore_allowed":false}');
+INSERT INTO customer_data_primary VALUES ('data_flow_1','integration_service','{"resource_id":"data_flow_1","subject_selector":"user_5","enabled":false}');
+INSERT INTO customer_data_primary VALUES ('support_1','support_platform','{"resource_id":"support_1","ticket_id":"CS-1","subject_reference":"user_5","message_text":"[REDACTED]"}');
+"""
+    recs = {r.resource_id: r for r in SqlSnapshotExtractor().extract(make_file(path="x.sql"), sql)}
+    assert recs["backup_1"].restore_allowed is False
+    assert recs["data_flow_1"].flow_enabled is False
+    s = recs["support_1"]
+    assert s.redacted_marker and s.category == DataCategory.SUPPORT_MESSAGE and s.has_user_reference
+
+
+def test_screenshot_detail_panel_carries_the_selected_records_state():
+    from deletion_auditor.infrastructure.extractors import ImageOcrExtractor
+    from deletion_auditor.infrastructure.interpreters import RuleBasedInterpreter
+
+    page = "Connections | data_flow_1121 customer_analytics_warehouse | data_flow_9846 lucia@x.com"
+    cases = {
+        "data_flow_1121\nStatus Healthy\nOwner Data Platform\nSelector jain@x.com\nSync mode Continuous sync": (
+            "flow_enabled",
+            True,
+        ),
+        "data_flow_1121\nStatus Paused\nSelector jain@x.com": ("flow_enabled", False),
+        "export_1260\nOwner ingrid@x.com\nExpires 25 Jun 2026\nActivity\nReady for download": ("state", ResourceState.PRESENT),
+        "backup_9287\nAccount areed@x.com\nChecksum Verified\nRetention end 26 Jul 2026": ("restore_allowed", None),
+    }
+    for panel, (attr, expected) in cases.items():
+        x = ImageOcrExtractor(RuleBasedInterpreter(), ocr=lambda b: page, panel_ocr=lambda b, p=panel: p)
+        rid = panel.split("\n")[0]
+        (rec_,) = [r for r in x.extract(make_file(path="s.png"), b"img") if r.resource_id == rid]
+        assert getattr(rec_, attr) == expected, panel
+        assert rec_.exposed_kinds == {"email"}
+
+
+def test_undetermined_record_gets_required_check_but_no_finding():
+    rules = [DeletionRule("r14", DataCategory.BACKUP_ARCHIVE, "restore can be blocked", RuleType.RETAIN)]
+    assert PolicyEvaluator(rules).required_check(DataCategory.BACKUP_ARCHIVE) == Operation.VERIFY_RESTORE_BLOCKED
+    d = StatusDecider().decide(YES, [], unresolved=["backup_9"])
+    steps = StepPlanner().plan(d, [], [(Operation.VERIFY_RESTORE_BLOCKED, "backup_service", "backup_9")])
+    assert [(s.phase.value, s.operation, s.evidence_id) for s in steps] == [
+        ("VERIFICATION", Operation.VERIFY_RESTORE_BLOCKED, "")
+    ]
+    # never added to a COMPLETE plan
+    ok = ResourceAssessment(
+        "account_service",
+        "account_1",
+        DataCategory.USER_PROFILE,
+        RuleType.DELETE,
+        True,
+        None,
+        None,
+        Operation.VERIFY_RECORD_ABSENT,
+        evidence_id="ev_1",
+    )
+    done = StatusDecider().decide(YES, [ok])
+    assert [s.operation for s in StepPlanner().plan(done, [ok], [(Operation.VERIFY_RESTORE_BLOCKED, "backup_service", "b")])] == [
+        Operation.VERIFY_RECORD_ABSENT
+    ]

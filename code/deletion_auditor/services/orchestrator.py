@@ -105,7 +105,15 @@ class AuditOrchestrator:
         undeterminable = [v.resource_id for v in views if v.in_window and v.resource_id not in assessed_ids]
         unresolved = sorted(undeterminable + stale_violations)
         decision = self.status_decider.decide(intent, assessments, unresolved)
-        steps = self.step_planner.plan(decision, assessments)
+        # A record confirmed to exist in the request window whose state cannot be determined gets no
+        # finding (nothing proves a violation) but the policy-required check that must pass afterwards.
+        by_id = {v.resource_id: v for v in views}
+        pending = [
+            (op, by_id[rid].system_id, rid)
+            for rid in undeterminable
+            if (op := self.policy_evaluator.required_check(by_id[rid].category)) is not None
+        ]
+        steps = self.step_planner.plan(decision, assessments, pending)
         result = AuditResult(request.case_id, decision, steps, assessments)
 
         if profile.primary_id is None:

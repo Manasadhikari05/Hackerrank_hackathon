@@ -13,7 +13,14 @@ from ..domain.models import AuditDecision, AuditStep, ResourceAssessment
 
 
 class StepPlanner:
-    def plan(self, decision: AuditDecision, assessments: list[ResourceAssessment]) -> list[AuditStep]:
+    def plan(
+        self,
+        decision: AuditDecision,
+        assessments: list[ResourceAssessment],
+        pending_checks: list[tuple[Operation, str, str]] | None = None,
+    ) -> list[AuditStep]:
+        """``pending_checks``: (verification, system_id, resource_id) required by policy for records whose
+        state is undetermined. They are added to INCOMPLETE plans only, as future checks with no evidence."""
         if decision.status == AuditStatus.NOT_APPLICABLE:
             return []
         # Steps that must cite evidence are only emitted when a citable (captured <= audit_at)
@@ -31,6 +38,8 @@ class StepPlanner:
                     drafts.append((a.remediation, a.system_id, a.resource_id, ""))
                 if a.verification:
                     drafts.append((a.verification, a.system_id, a.resource_id, ""))
+            for op, sys_id, rid in pending_checks or []:
+                drafts.append((op, sys_id, rid, ""))
 
         unique = {(op, sys_id, rid): ev for op, sys_id, rid, ev in drafts}
         ordered = sorted(unique.items(), key=lambda kv: step_sort_key(OPERATION_SPECS[kv[0][0]].phase, *kv[0]))

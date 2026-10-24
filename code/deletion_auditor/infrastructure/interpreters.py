@@ -22,6 +22,7 @@ from .record_builder import RESOURCE_ID_RE, build_record
 
 log = logging.getLogger(__name__)
 
+PANEL_MARKER = "[[DETAIL PANEL]]"
 STATE_WORDS = ("NOT_FOUND", "FOUND", "IDENTIFIABLE", "REDACTED", "ANONYMIZED", "ACTIVE", "BLOCKED", "DISABLED")
 CATEGORY_RE = re.compile(r"\b(" + "|".join(c.value for c in DataCategory) + r")\b")
 RETAIN_RE = re.compile(r"retain(?:ed)?\s+until\s+(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})", re.I)
@@ -56,6 +57,48 @@ class RuleBasedInterpreter(EvidenceInterpreter):
         self._aliases = dict(aliases)
 
     def interpret(self, raw_content: str, evidence: EvidenceFile) -> list[EvidenceRecord]:
+        raw_content, _, panel = raw_content.partition(PANEL_MARKER)
+        records = self._interpret_text(raw_content, evidence)
+        panel_record = self._panel_record(panel, evidence) if panel.strip() else None
+        if panel_record is not None:
+            # The detail panel describes the selected record precisely; it replaces the coarse
+            # whole-page reading of that same record.
+            records = [r for r in records if r.resource_id != panel_record.resource_id] + [panel_record]
+        return records
+
+    def _panel_record(self, panel: str, evidence: EvidenceFile) -> EvidenceRecord | None:
+        """Selected-record detail panel of an admin console: first line names the record, then
+        labelled fields. Only states the screen actually shows are recorded; anything else stays unknown."""
+        lines = [ln.strip(" '‘’|") for ln in panel.splitlines() if ln.strip()]
+        if not lines:
+            return None
+        head = RESOURCE_ID_RE.search(lines[0].replace(" ", "_")) or RESOURCE_ID_RE.search(lines[0])
+        if not head:
+            return None
+        rid = head.group(0)
+        text = " ".join(lines[1:]).lower()
+        fields: dict[str, object] = {"resource_id": rid, "content": " ".join(lines[1:])}
+        status = re.search(r"\bstatus\s+([a-z ]+?)(?:\s+owner|\s+destination|\s+selector|$)", text)
+        status_word = status.group(1).strip() if status else ""
+        if rid.startswith("data_flow_"):
+            if re.search(r"paused|disabled|stopped|inactive", status_word):
+                fields["enabled"] = False
+            elif re.search(r"healthy|active|running|enabled", status_word):
+                fields["enabled"] = True
+        elif rid.startswith("export_"):
+            if re.search(r"\bexpired\b|\bdeleted\b|revoked", text):
+                fields["available"] = False
+            elif re.search(r"ready for download|\bready\b|available", text):
+                fields["available"] = True
+        elif rid.startswith("backup_"):
+            if re.search(r"restore (?:is )?blocked|deletion block(?:ed)?|restore disabled", text):
+                fields["restore_allowed"] = False
+            elif re.search(r"restore (?:is )?allowed|restorable|restore enabled", text):
+                fields["restore_allowed"] = True
+            # otherwise the screen does not show restore controls: restore state stays unknown
+        return build_record(fields, evidence, _evidence_type(evidence), source="ocr:detail_panel")
+
+    def _interpret_text(self, raw_content: str, evidence: EvidenceFile) -> list[EvidenceRecord]:
         lines = [ln.strip() for ln in raw_content.splitlines() if ln.strip()]
         delimited = [ln for ln in lines if "|" in ln and RESOURCE_ID_RE.search(ln)]
         if delimited:

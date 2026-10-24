@@ -83,6 +83,24 @@ class PolicyEvaluator:
         for rule in rules:
             self._actions[rule.data_category] = rule.action
 
+    REQUIRED_CHECK = {
+        RuleType.DELETE: Operation.VERIFY_RECORD_ABSENT,
+        RuleType.REDACT: Operation.VERIFY_RECORD_REDACTED,
+        RuleType.ANONYMIZE: Operation.VERIFY_RECORD_ANONYMIZED,
+        RuleType.RETAIN: Operation.VERIFY_RECORD_PRESENT,
+    }
+
+    def required_check(self, category: DataCategory | None) -> Operation | None:
+        """The post-condition policy requires for a record of this category, independent of its
+        current (possibly unknown) state. Used for checks that must pass on an INCOMPLETE case."""
+        if category == DataCategory.DATA_FLOW:
+            return Operation.VERIFY_DATA_FLOW_DISABLED
+        if category == DataCategory.BACKUP_ARCHIVE:
+            return Operation.VERIFY_RESTORE_BLOCKED
+        if category is None:
+            return None
+        return self.REQUIRED_CHECK.get(self._actions.get(category, RuleType.DELETE))
+
     def required_action(self, category: DataCategory, record: EvidenceRecord, audit_at: datetime) -> RuleType:
         action = self._actions.get(category, RuleType.DELETE)
         if action == RuleType.RETAIN and category == DataCategory.SECURITY_AUDIT_LOG:
