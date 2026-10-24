@@ -1,0 +1,23 @@
+{
+  "exported_at": "2026-09-10T09:00:00Z",
+  "service_exports": {
+    "search_service": {
+      "index_queries": [
+        {"resource_id": "search_7404", "query": "ravi.menon@example.com", "observed_at": "2026-09-10T08:00:00Z",
+         "hits": {"total": 1, "documents": [{"resource_id": "search_7404", "email": "ravi.menon@example.com", "display_name": "Ravi Menon"}]}},
+        {"resource_id": "search_7504", "query": "ravi.menon.jr@example.com", "observed_at": "2026-09-10T08:01:00Z",
+         "hits": {"total": 1, "documents": [{"resource_id": "search_7504", "email": "ravi.menon.jr@example.com", "display_name": "Ravi Menon Jr"}]}}
+      ]
+    },
+    "integration_service": {
+      "connectors": [
+        {"resource_id": "data_flow_7604", "connector_name": "customer_events_connector", "customer_email": "ravi.menon@example.com", "enabled": true, "last_delivery_status": "delivered", "observed_at": "2026-09-10T08:02:00Z"}
+      ]
+    },
+    "support_platform": {
+      "tickets": [
+        {"resource_id": "support_7704", "ticket_id": "CS-7704", "customer_reference": null, "message_text": "Please send the delivery update for order ORD-7704 to ravi.menon@example.com.", "observed_at": "2026-09-10T08:03:00Z"}
+      ]
+    }
+  }
+}

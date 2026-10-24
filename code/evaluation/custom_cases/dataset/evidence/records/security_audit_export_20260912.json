@@ -1,0 +1,6 @@
+{
+  "exported_at": "2026-09-12T09:00:00Z",
+  "records": [
+    {"resource_id": "audit_record_7201", "subject_reference": "user_901", "event_code": "ACCOUNT_DELETION_RECORDED", "retention_until": "2033-12-31T23:59:59Z", "observed_at": "2026-09-12T08:30:00Z"}
+  ]
+}

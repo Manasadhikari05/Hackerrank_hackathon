@@ -1,5 +1,17 @@
 # HackerRank Orchestrate - October 2026
 
+> **Solution in this repository.** The deletion-audit agent is in `code/`. Architecture, design
+> decisions and tests are documented in [`code/README.md`](./code/README.md).
+>
+> ```bash
+> python3 -m pip install -r code/requirements.txt   # plus the tesseract binary for screenshot OCR
+> python3 code/main.py                               # writes ./output.csv (518 rows, contract-validated)
+> python3 code/evaluation/main.py --tests --full     # tests + sample/custom regression + full-run validation
+> ```
+>
+> Reports: [`code/evaluation/evaluation_report.md`](./code/evaluation/evaluation_report.md),
+> [`code/evaluation/usage_report.md`](./code/evaluation/usage_report.md). CI: `.github/workflows/ci.yml`.
+
 ## Ghost Data Still Exists
 
 Build an AI agent that audits whether a user's personal data was actually deleted.

@@ -1,0 +1,4 @@
+activity_id,event_time,event_type,source_system,target_system,resource_id,reported_result,details
+activity_9001,2026-09-03T09:55:00Z,DELETE_RECORD,deletion_worker,account_service,account_7001,SUCCESS,Deletion worker reported the requested operation as completed. Target resource: account_7001.
+activity_9002,2026-09-02T09:50:00Z,DELETE_RECORD,deletion_worker,account_service,account_7003,SUCCESS,Deletion worker reported the requested operation as completed. Target resource: account_7003.
+activity_9003,2026-09-02T09:58:00Z,DISABLE_DATA_FLOW,deletion_worker,integration_service,data_flow_7604,SUCCESS,Policy action completed for data_flow_7604.

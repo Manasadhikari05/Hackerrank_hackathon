@@ -1,0 +1,7 @@
+# Runtime dependencies (Python 3.10+). The core pipeline is standard-library only;
+# these are needed for PDF text and screenshot OCR evidence.
+PyPDF2>=3.0,<4
+pytesseract>=0.3.10
+Pillow>=10.0
+# Optional: only used when AUDIT_USE_LLM=1 and OPENAI_API_KEY are set.
+# openai>=1.30

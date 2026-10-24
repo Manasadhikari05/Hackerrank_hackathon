@@ -1,0 +1,15 @@
+{
+  "exported_at": "2026-09-14T09:00:00Z",
+  "service_exports": {
+    "account_service": {
+      "profile_lookups": [
+        {"resource_id": "account_7003", "query": "aiko.sato@example.com", "status_code": 404, "profile": null, "observed_at": "2026-09-14T08:10:00Z"}
+      ]
+    },
+    "identity_service": {
+      "tombstones": [
+        {"resource_id": "tombstone_7303", "subject_reference": "user_903", "name": null, "email": null, "phone": null, "email_hash": null, "account_status": "DELETED", "observed_at": "2026-09-14T08:20:00Z"}
+      ]
+    }
+  }
+}

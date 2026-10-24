@@ -1,0 +1,12 @@
+cache-dir = "../.ruff_cache"
+line-length = 130
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E731", "B008"]
+
+[lint.per-file-ignores]
+"tests/**" = ["E501"]
+"main.py" = ["E402"]
+"evaluation/main.py" = ["E402", "E501"]  # long Markdown table templates

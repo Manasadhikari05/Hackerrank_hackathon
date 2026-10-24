@@ -1,0 +1,3 @@
+audit_id,user_id,event_time,field_name,old_value,new_value
+audit_9001,user_901,2025-11-02T09:00:00Z,email,ines.m.old@example.org,ines.moreau@example.org
+audit_9002,user_901,2025-11-02T09:00:00Z,email_hash,e5c7ec02953ecdccfa635319ac3382888434a6999f4899d35461141355ace8dc,baa1621479ace8675481e41aca48cf5a13dc2a7629173e9aac9d16359d6480de

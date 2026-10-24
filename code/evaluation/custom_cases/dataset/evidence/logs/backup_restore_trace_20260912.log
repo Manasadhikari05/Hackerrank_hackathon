@@ -1,0 +1,3 @@
+2026-09-12T07:58:00Z [DEBUG] [backup_service] [tr-9000001] restore_policy_check_started: instance="backup-1" subject_key="user_901" attempt="1"
+2026-09-12T07:58:01Z [DEBUG] [backup_service] [tr-9000001] cache_lookup: instance="backup-1" result="miss" cache="backup_service_lookup_v2"
+2026-09-12T07:58:02Z [ERROR] [backup_service] [tr-9000001] restore_candidate_evaluated: instance="backup-1" resource_id="backup_7101" eligible="true" deletion_block="false"

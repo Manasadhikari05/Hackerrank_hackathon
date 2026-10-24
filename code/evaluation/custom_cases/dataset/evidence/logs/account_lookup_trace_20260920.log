@@ -1,0 +1,2 @@
+2026-09-20T07:59:00Z level=DEBUG service=account_service trace_id=rb-900001 event=profile_lookup_started resource_id=account_7003 lookup_key=aiko.sato@example.com
+2026-09-20T07:59:01Z level=INFO service=account_service trace_id=rb-900001 event=profile_lookup_completed resource_id=account_7003 rows=1 http_status=200
