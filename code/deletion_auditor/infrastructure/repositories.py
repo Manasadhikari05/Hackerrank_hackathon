@@ -45,6 +45,18 @@ def _read_csv(path: Path, required: tuple[str, ...]) -> list[dict[str, str]]:
         return list(reader)
 
 
+def _embedded_request_row(row: dict[str, str]) -> str | None:
+    """Return the case_id of a complete request row hidden inside a multi-line field, if any."""
+    for value in row.values():
+        if not isinstance(value, str) or "\n" not in value:
+            continue
+        for line in value.splitlines()[1:]:
+            fields = next(csv.reader([line]), [])
+            if len(fields) >= 7 and parse_ts(fields[2]) and parse_ts(fields[5]):
+                return fields[0]
+    return None
+
+
 class CsvRequestRepository(RequestRepository):
     def __init__(self, path: Path):
         self._path = Path(path)
@@ -58,6 +70,14 @@ class CsvRequestRepository(RequestRepository):
             audit = parse_ts(row.get("audit_at"))
             if not case_id or requested is None or audit is None:
                 raise MalformedInputError(f"{self._path.name}:{i} has an empty case_id or invalid timestamp")
+            swallowed = _embedded_request_row(row)
+            if swallowed:
+                # A stray quote makes csv merge the following request(s) into this field: fail loudly
+                # rather than silently dropping a case.
+                raise MalformedInputError(
+                    f"{self._path.name}:{i} ({case_id}) contains what looks like another request row "
+                    f"({swallowed!r}); check for an unterminated quote"
+                )
             if requested > audit:
                 # A request cannot be audited before it was made; equal timestamps are valid.
                 raise MalformedInputError(f"{self._path.name}:{i} ({case_id}) has requested_at after audit_at")

@@ -175,3 +175,13 @@ def test_deterministic_output(custom_dataset, tmp_path):
     first = (tmp_path / "out.csv").read_bytes()
     run(custom_dataset, tmp_path)
     assert (tmp_path / "out.csv").read_bytes() == first
+
+
+def test_output_independent_of_request_order(custom_dataset, tmp_path):
+    run(custom_dataset, tmp_path)
+    first = (tmp_path / "out.csv").read_bytes()
+    p = custom_dataset / "deletion_requests.csv"
+    lines = p.read_text().splitlines()
+    p.write_text("\n".join([lines[0]] + list(reversed(lines[1:]))) + "\n")
+    run(custom_dataset, tmp_path)
+    assert (tmp_path / "out.csv").read_bytes() == first

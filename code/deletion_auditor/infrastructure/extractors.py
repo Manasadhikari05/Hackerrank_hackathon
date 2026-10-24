@@ -77,6 +77,12 @@ class SqlSnapshotExtractor(EvidenceExtractor):
         return evidence.extension == "sql"
 
     @staticmethod
+    def _authorize(action: int, *_args) -> int:
+        if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    @staticmethod
     def _expand_json_columns(fields: dict[str, Any]) -> dict[str, Any]:
         """Replica tables store each record as a JSON document (``record_json``). Its structured fields
         (restore_allowed, enabled, message_text, ...) must be read as fields, not as opaque text."""
@@ -98,6 +104,9 @@ class SqlSnapshotExtractor(EvidenceExtractor):
 
     def extract(self, evidence: EvidenceFile, content: bytes) -> list[EvidenceRecord]:
         conn = sqlite3.connect(":memory:")
+        # Evidence is untrusted input: it may build its own in-memory tables, but ATTACH/DETACH (the only
+        # way a script can open or create files) are denied, so reading evidence never touches the disk.
+        conn.set_authorizer(self._authorize)
         try:
             conn.executescript(content.decode("utf-8"))
         except (sqlite3.Error, UnicodeDecodeError) as exc:

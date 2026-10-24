@@ -31,7 +31,11 @@ class StatusDecider:
             return AuditDecision(AuditStatus.INCOMPLETE, f"{len(open_items)} unresolved item(s): {names}")
         reasons = []
         if not assessments:
-            reasons.append("no admissible evidence links any record to the subject")
+            reasons.append(
+                "no record linked to the subject was observed during the request window"
+                if unresolved
+                else "no admissible evidence links any record to the subject"
+            )
         unproven = [a.resource_id for a in assessments if not a.proven]
         if unproven:
             reasons.append(f"compliance not provable from evidence available at audit_at: {unproven[:5]}")

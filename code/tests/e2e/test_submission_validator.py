@@ -55,3 +55,16 @@ def test_rejects_complete_without_proof_and_missing_rows(tmp_path):
 
     errs = _mutate(tmp_path, corrupt)
     assert any("COMPLETE without" in e for e in errs) and any("case_id set differs" in e for e in errs)
+
+
+def test_rejects_finding_remediated_by_the_wrong_operation(tmp_path):
+    def mispair(rows):
+        r = next(r for r in rows[1:] if "REPORT_ACTIVE_DATA_FLOW" in r[2])
+        steps = json.loads(r[2])
+        for s in steps:
+            if s["operation"] == "DISABLE_DATA_FLOW":
+                s["operation"], s["state"] = "DELETE_RECORD", "ABSENT"
+        r[2] = json.dumps(steps)
+
+    errs = _mutate(tmp_path, mispair)
+    assert any("remediated by ['DELETE_RECORD']" in e for e in errs)

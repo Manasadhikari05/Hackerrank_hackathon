@@ -60,6 +60,29 @@ NON_DELETION_TOPICS = [
 ]
 
 
+ENGLISH_DELETION_VERB = re.compile(r"\b(delet\w*|eras\w*|remov\w*|clos(?:e|ed|ing)\b)")
+NEGATOR = re.compile(r"\b(not|never|no need to|don't|dont|doesn't|didn't|won't|shouldn't)\b")
+NON_ENGLISH_DELETION = re.compile(
+    r"suppression|supprimer|effacer|eliminar|eliminación|borrar|exclusão|excluir|apagar|löschen|löschung|"
+    r"cancellare|cancellazione|削除|삭제|删除|刪除|удал"
+)
+
+
+def all_deletion_mentions_negated(text: str) -> bool:
+    """True when every English deletion verb is negated within its own clause ("I do not want my account
+    deleted", "no need to erase my data") and no other-language deletion cue is present."""
+    if NON_ENGLISH_DELETION.search(text):
+        return False
+    mentions = 0
+    for clause in re.split(r"[.!?;:\n]+", text):
+        for m in ENGLISH_DELETION_VERB.finditer(clause):
+            mentions += 1
+            window = " ".join(clause[: m.start()].split()[-6:])
+            if not NEGATOR.search(window):
+                return False
+    return mentions > 0
+
+
 class RuleBasedIntentClassifier(IntentClassifier):
     def classify(self, request: DeletionRequest) -> IntentDecision:
         text = request.request_text.lower()
@@ -68,6 +91,10 @@ class RuleBasedIntentClassifier(IntentClassifier):
         topic = [p for p in NON_DELETION_TOPICS if re.search(p, text)]
         if refusal:
             return IntentDecision(False, 0.95, f"explicit non-deletion phrase: {refusal[0]}", "rules")
+        if deletion and all_deletion_mentions_negated(text):
+            # Every deletion mention is negated: a refusal, not an authorisation. Medium confidence so an
+            # enabled LLM fallback can still arbitrate unusual phrasing.
+            return IntentDecision(False, 0.75, "every deletion mention is negated", "rules")
         if deletion:
             confidence = 0.6 if topic else 0.95
             return IntentDecision(True, confidence, f"deletion phrase: {deletion[0]}", "rules")

@@ -50,6 +50,21 @@ OPERATIONS = [
 ]
 OP = {name: (phase, state, i) for i, (name, phase, state) in enumerate(OPERATIONS)}
 PHASES = ["FINDING", "REMEDIATION", "VERIFICATION"]
+# Which remediation answers a finding, and which verification proves a remediation's end state
+# (the Meaning column of the official operation table).
+FIX_FOR = {
+    "REPORT_REMAINING_RECORD": {"DELETE_RECORD"},
+    "REPORT_EXPOSED_PII": {"REDACT_RECORD", "ANONYMIZE_RECORD"},
+    "REPORT_ACTIVE_DATA_FLOW": {"DISABLE_DATA_FLOW"},
+    "REPORT_RESTORE_RISK": {"BLOCK_RESTORE"},
+}
+CHECK_FOR = {
+    "DELETE_RECORD": "VERIFY_RECORD_ABSENT",
+    "REDACT_RECORD": "VERIFY_RECORD_REDACTED",
+    "ANONYMIZE_RECORD": "VERIFY_RECORD_ANONYMIZED",
+    "DISABLE_DATA_FLOW": "VERIFY_DATA_FLOW_DISABLED",
+    "BLOCK_RESTORE": "VERIFY_RESTORE_BLOCKED",
+}
 ZIP_FORBIDDEN = re.compile(
     r"(^|/)(dataset|\.venv|venv|node_modules|__pycache__|\.pytest_cache|\.ruff_cache|\.git)/|"
     r"\.(zip|tar|gz|tgz|7z|rar)$|(^|/)\.env$|(^|/)\.DS_Store$"
@@ -74,6 +89,17 @@ def readable_bytes(path: Path) -> bytes:
         except Exception:  # PyPDF2 missing or unreadable PDF: fall back to raw bytes
             pass
     return data
+
+
+def ocr_text(path: Path) -> bytes | None:
+    """Full-page OCR text of a screenshot, or None when Tesseract is not available."""
+    try:
+        import pytesseract
+        from PIL import Image
+
+        return pytesseract.image_to_string(Image.open(path)).encode()
+    except Exception:
+        return None
 
 
 def case_num(case_id: str) -> int:
@@ -168,6 +194,7 @@ def check_output(path: Path, report: Report) -> dict:
         audit = ts(requests[cid]["audit_at"]) if cid in requests else None
         prev, seen = None, set()
         found, fixed, verified = set(), set(), set()
+        ops_by_res: dict[tuple, dict[str, set]] = {}
         for n, s in enumerate(steps, 1):
             if not isinstance(s, dict) or set(s) != STEP_KEYS:
                 errors.append(f"{cid}: step {n} keys {sorted(s) if isinstance(s, dict) else type(s)}")
@@ -190,6 +217,7 @@ def check_output(path: Path, report: Report) -> dict:
             seen.add(ident)
             res = (s["system_id"], s["resource_id"])
             {"FINDING": found, "REMEDIATION": fixed, "VERIFICATION": verified}[phase].add(res)
+            ops_by_res.setdefault(res, {p: set() for p in PHASES})[phase].add(s["operation"])
             if st == "COMPLETE" and phase != "VERIFICATION":
                 errors.append(f"{cid}: COMPLETE contains {phase}")
             must_cite = phase == "FINDING" or (st == "COMPLETE" and phase == "VERIFICATION")
@@ -212,7 +240,18 @@ def check_output(path: Path, report: Report) -> dict:
                     errors.append(f"{cid}: {ev} does not concern {rid}")
             elif ev in paths:
                 if paths[ev].lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                    provenance["screenshot (needs OCR; not text-verifiable)"] += 1
+                    if ev not in file_cache:
+                        file_cache[ev] = ocr_text(DATASET / paths[ev])
+                    text = file_cache[ev]
+                    if text is None:
+                        provenance["screenshot (OCR unavailable; not verified)"] += 1
+                    elif rid.encode() in text or rid.replace("_", " ").encode() in text:
+                        provenance["screenshot OCR shows resource id"] += 1
+                    elif any(a.encode() in text for a in aliases.get(rid, ())):
+                        provenance["screenshot OCR shows catalog alias"] += 1
+                    else:
+                        provenance["screenshot OCR does NOT show resource"] += 1
+                        errors.append(f"{cid}: screenshot {ev} does not show {rid}")
                     continue
                 if ev not in file_cache:
                     file_cache[ev] = readable_bytes(DATASET / paths[ev])
@@ -233,6 +272,13 @@ def check_output(path: Path, report: Report) -> dict:
                 errors.append(f"{cid}: remediation without finding {res}")
             for res in sorted(fixed - verified):
                 errors.append(f"{cid}: remediation without verification {res}")
+            for res, ops in sorted(ops_by_res.items()):
+                for f in ops["FINDING"]:
+                    if ops["REMEDIATION"] and not (ops["REMEDIATION"] & FIX_FOR[f]):
+                        errors.append(f"{cid}: {f} on {res} remediated by {sorted(ops['REMEDIATION'])}")
+                for r in ops["REMEDIATION"]:
+                    if CHECK_FOR[r] not in ops["VERIFICATION"]:
+                        errors.append(f"{cid}: {r} on {res} is not verified by {CHECK_FOR[r]}")
 
     facts = {
         "rows": len(rows),
@@ -244,6 +290,15 @@ def check_output(path: Path, report: Report) -> dict:
     }
     report.add("output.csv", errors, warnings, facts)
     return facts
+
+
+def committed_log(path: Path) -> str | None:
+    try:
+        rel = path.resolve().relative_to(ROOT)
+        out = subprocess.run(["git", "show", f"HEAD:{rel.as_posix()}"], cwd=ROOT, capture_output=True, timeout=30)
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.decode("utf-8") if out.returncode == 0 else None
 
 
 def check_log(path: Path, report: Report) -> None:
@@ -267,6 +322,13 @@ def check_log(path: Path, report: Report) -> None:
                     errors.append(f"entry '{title}': missing section {section}")
     if SECRET.search(text):
         errors.append("possible secret in log.txt")
+    # AGENTS.md section 2: append-only. The committed log must be an exact prefix of the working copy;
+    # this catches deleted or rewritten entries (which per-entry format checks cannot see).
+    committed = committed_log(path)
+    if committed is None:
+        warnings.append("append-only check skipped: log.txt is not tracked in a git checkout")
+    elif not text.startswith(committed):
+        errors.append("log.txt is not append-only: the committed version is not a prefix of the working copy")
     report.add(
         "log.txt",
         errors,

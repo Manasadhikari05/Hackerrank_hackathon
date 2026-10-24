@@ -19,13 +19,13 @@ Non-LLM components used in the run:
 | Tesseract OCR 5 via `pytesseract` | Reads text from screenshot evidence | local |
 
 <!-- BEGIN GENERATED-USAGE -->
-_Generated on 2026-10-24 18:34 UTC from the full run that wrote `output.csv`._
+_Generated on 2026-10-24 19:08 UTC from the full run that wrote `output.csv`._
 
 | Item | Value |
 |---|---|
 | Requests processed | 518 |
 | Status counts | COMPLETE: 153, INCOMPLETE: 355, NOT_APPLICABLE: 10 |
-| Wall-clock time | 10.13 s |
+| Wall-clock time | 10.17 s |
 | Model calls | 0 (LLM disabled; deterministic pipeline) |
 <!-- END GENERATED-USAGE -->
 
