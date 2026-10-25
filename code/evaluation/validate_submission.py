@@ -91,6 +91,11 @@ def readable_bytes(path: Path) -> bytes:
     return data
 
 
+def mentions(token: str, data: bytes) -> bool:
+    """Whole-token match: ``account_1`` must not match inside ``account_10`` or ``xaccount_1``."""
+    return re.search(rb"(?<![A-Za-z0-9_])" + re.escape(token.encode()) + rb"(?![A-Za-z0-9_])", data) is not None
+
+
 def ocr_text(path: Path) -> bytes | None:
     """Full-page OCR text of a screenshot, or None when Tesseract is not available."""
     try:
@@ -245,9 +250,9 @@ def check_output(path: Path, report: Report) -> dict:
                     text = file_cache[ev]
                     if text is None:
                         provenance["screenshot (OCR unavailable; not verified)"] += 1
-                    elif rid.encode() in text or rid.replace("_", " ").encode() in text:
+                    elif mentions(rid, text) or mentions(rid.replace("_", " "), text):
                         provenance["screenshot OCR shows resource id"] += 1
-                    elif any(a.encode() in text for a in aliases.get(rid, ())):
+                    elif any(mentions(a, text) for a in aliases.get(rid, ())):
                         provenance["screenshot OCR shows catalog alias"] += 1
                     else:
                         provenance["screenshot OCR does NOT show resource"] += 1
@@ -256,9 +261,9 @@ def check_output(path: Path, report: Report) -> dict:
                 if ev not in file_cache:
                     file_cache[ev] = readable_bytes(DATASET / paths[ev])
                 data = file_cache[ev]
-                if rid.encode() in data:
+                if mentions(rid, data):
                     provenance["file contains resource id"] += 1
-                elif any(a.encode() in data for a in aliases.get(rid, ())):
+                elif any(mentions(a, data) for a in aliases.get(rid, ())):
                     provenance["file contains catalog alias of resource"] += 1
                 else:
                     provenance["file does NOT mention resource"] += 1
@@ -301,6 +306,21 @@ def committed_log(path: Path) -> str | None:
     return out.stdout.decode("utf-8") if out.returncode == 0 else None
 
 
+def historical_headers(path: Path) -> set[str]:
+    """Entry header lines from every committed version of the log (empty in shallow clones)."""
+    headers: set[str] = set()
+    try:
+        rel = path.resolve().relative_to(ROOT).as_posix()
+        revs = subprocess.run(["git", "log", "--format=%H", "--", rel], cwd=ROOT, capture_output=True, timeout=60)
+        for rev in revs.stdout.decode().split():
+            blob = subprocess.run(["git", "show", f"{rev}:{rel}"], cwd=ROOT, capture_output=True, timeout=30)
+            if blob.returncode == 0:
+                headers |= set(re.findall(r"(?m)^## \[[^\]]+\][^\n]*$", blob.stdout.decode("utf-8", "replace")))
+    except (ValueError, OSError, subprocess.SubprocessError):
+        return set()
+    return headers
+
+
 def check_log(path: Path, report: Report) -> None:
     errors, warnings = [], []
     text = path.read_text(encoding="utf-8")
@@ -329,6 +349,12 @@ def check_log(path: Path, report: Report) -> None:
         warnings.append("append-only check skipped: log.txt is not tracked in a git checkout")
     elif not text.startswith(committed):
         errors.append("log.txt is not append-only: the committed version is not a prefix of the working copy")
+    # A truncation that was itself committed would pass the HEAD comparison, so every entry header that
+    # ever existed in any committed version must still be present.
+    historical = historical_headers(path)
+    lost = sorted(h for h in historical if h not in text)
+    if lost:
+        errors.append(f"{len(lost)} previously committed transcript entr(y/ies) missing: {lost[:3]}")
     report.add(
         "log.txt",
         errors,

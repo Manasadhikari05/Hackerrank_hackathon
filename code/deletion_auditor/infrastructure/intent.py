@@ -62,6 +62,8 @@ NON_DELETION_TOPICS = [
 
 ENGLISH_DELETION_VERB = re.compile(r"\b(delet\w*|eras\w*|remov\w*|clos(?:e|ed|ing)\b)")
 NEGATOR = re.compile(r"\b(not|never|no need to|don't|dont|doesn't|didn't|won't|shouldn't)\b")
+# A negated *different* action ("do not keep my data - delete it") does not negate a later deletion.
+CONTRARY_VERB = re.compile(r"\b(keep|keeping|retain|store|hold|save|preserve|maintain|share|sell|use|send|want to keep)\b")
 NON_ENGLISH_DELETION = re.compile(
     r"suppression|supprimer|effacer|eliminar|eliminación|borrar|exclusão|excluir|apagar|löschen|löschung|"
     r"cancellare|cancellazione|削除|삭제|删除|刪除|удал"
@@ -74,11 +76,12 @@ def all_deletion_mentions_negated(text: str) -> bool:
     if NON_ENGLISH_DELETION.search(text):
         return False
     mentions = 0
-    for clause in re.split(r"[.!?;:\n]+", text):
+    for clause in re.split(r"[.!?;:\n\u2013\u2014]+|\s-\s", text):
         for m in ENGLISH_DELETION_VERB.finditer(clause):
             mentions += 1
             window = " ".join(clause[: m.start()].split()[-6:])
-            if not NEGATOR.search(window):
+            negators = list(NEGATOR.finditer(window))
+            if not negators or CONTRARY_VERB.search(window[negators[-1].end() :]):
                 return False
     return mentions > 0
 
@@ -90,7 +93,10 @@ class RuleBasedIntentClassifier(IntentClassifier):
         deletion = [p for p in DELETION_PATTERNS if re.search(p, text)]
         topic = [p for p in NON_DELETION_TOPICS if re.search(p, text)]
         if refusal:
-            return IntentDecision(False, 0.95, f"explicit non-deletion phrase: {refusal[0]}", "rules")
+            # A refusal wins over a deletion mention (never delete on contradictory instructions), but a
+            # message that also asks for deletion outright is flagged as uncertain for review / LLM arbitration.
+            contradictory = bool(deletion) and not all_deletion_mentions_negated(text)
+            return IntentDecision(False, 0.6 if contradictory else 0.95, f"explicit non-deletion phrase: {refusal[0]}", "rules")
         if deletion and all_deletion_mentions_negated(text):
             # Every deletion mention is negated: a refusal, not an authorisation. Medium confidence so an
             # enabled LLM fallback can still arbitrate unusual phrasing.

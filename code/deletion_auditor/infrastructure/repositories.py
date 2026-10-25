@@ -42,7 +42,16 @@ def _read_csv(path: Path, required: tuple[str, ...]) -> list[dict[str, str]]:
         missing = [c for c in required if c not in (reader.fieldnames or [])]
         if missing:
             raise MalformedInputError(f"{path.name} is missing columns {missing}")
-        return list(reader)
+        rows = []
+        for line, row in enumerate(reader, start=2):
+            # csv.DictReader silently parks surplus fields under key None and fills short rows with None:
+            # either way a column has shifted (e.g. an unquoted comma in free text), so fail loudly.
+            if None in row:
+                raise MalformedInputError(f"{path.name}:{line} has more fields than the header (unquoted comma?)")
+            if any(v is None for v in row.values()):
+                raise MalformedInputError(f"{path.name}:{line} has fewer fields than the header")
+            rows.append(row)
+        return rows
 
 
 def _embedded_request_row(row: dict[str, str]) -> str | None:

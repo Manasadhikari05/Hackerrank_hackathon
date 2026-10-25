@@ -185,3 +185,55 @@ def test_unexpected_types_in_json_evidence_do_not_crash():
     doc = {"records": [{"resource_id": "backup_1", "restore_allowed": "maybe", "subject_reference": 7, "email": ["a@b.com"]}]}
     (r,) = JsonExtractor().extract(make_file(), json.dumps(doc).encode())
     assert r.restore_allowed is None and "email:a@b.com" in r.identifiers
+
+
+# ---- release-candidate audit -----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Please do not keep my data — delete it.",
+        "Please do not keep my data, delete it.",
+        "Please do not keep my data - delete it.",
+    ],
+)
+def test_negated_other_action_does_not_negate_a_deletion(text):
+    """Regression (introduced by the negation fix): 'do not keep ... delete it' was read as a refusal."""
+    assert RuleBasedIntentClassifier().classify(make_request(text=text)).authorizes_deletion
+
+
+@pytest.mark.parametrize(
+    "body,needle",
+    [
+        (
+            "c1,a@b.com,2026-09-01T00:00:00Z,COMPLETE,2026-09-02T00:00:00Z,2026-09-10T00:00:00Z,Please delete, thanks\n",
+            "more fields",
+        ),
+        ("c1,a@b.com,2026-09-01T00:00:00Z,COMPLETE,2026-09-02T00:00:00Z,2026-09-10T00:00:00Z\n", "fewer fields"),
+    ],
+)
+def test_shifted_csv_columns_fail_fast(tmp_path, body, needle):
+    """Regression: an unquoted comma silently truncated request_text (surplus field dropped)."""
+    p = tmp_path / "req.csv"
+    p.write_text("case_id,email,requested_at,reported_status,reported_at,audit_at,request_text\n" + body)
+    with pytest.raises(MalformedInputError, match=needle):
+        CsvRequestRepository(p).load_requests()
+
+
+def test_validator_matches_whole_identifiers_only():
+    """Regression: substring matching let 'account_1' be 'found' inside 'account_10'."""
+    vs = _validator()
+    assert not vs.mentions("account_1", b"see account_10 and xaccount_1")
+    assert vs.mentions("account_1", b"see account_1.")
+
+
+def test_validator_detects_a_committed_truncation(tmp_path, monkeypatch):
+    """Regression: comparing only with HEAD accepted a truncation that had itself been committed."""
+    vs = _validator()
+    start = "## [2026-01-01T00:00:00Z] SESSION START\n\ntool=Claude Code\nmodel=m-1\n\n"
+    log = tmp_path / "log.txt"
+    log.write_text(start + ENTRY.format(t="two"))  # entry "one" was removed and that removal committed
+    monkeypatch.setattr(vs, "committed_log", lambda p: log.read_text())
+    monkeypatch.setattr(vs, "historical_headers", lambda p: {"## [2026-01-01T00:00:00Z] one", "## [2026-01-01T00:00:00Z] two"})
+    report = vs.Report()
+    vs.check_log(log, report)
+    assert any("missing" in e for e in report.sections[0][1])
